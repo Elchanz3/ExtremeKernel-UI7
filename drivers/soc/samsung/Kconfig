@@ -39,6 +39,24 @@ config ECT_DUMP
 	default n
 	depends on ECT
 
+config EXYNOS_ECT_DVFS
+	bool "Take every DVFS table and limit from the bootloader's ECT"
+	default y
+	depends on ECT
+	help
+	  The bootloader hands the kernel its ECT at the /ect parameter_address
+	  after its own runtime fix-ups. Stock kernels then let the device tree
+	  narrow it: CPU max-freq/min-freq, devfreq freq_info and boot_info, and
+	  the GPU's gpu_dvfs_table, gpu_max_clock and gpu_min_clock decide which
+	  ECT levels exist and how far each domain may go.
+
+	  With this option the ECT is the source for every domain. The level
+	  set comes from its DVFS block and min/max/boot from its MINMAX row for
+	  the chip's ASV table version. The device tree only contributes
+	  per-level parameters (governor thresholds, QoS links), and values it
+	  gives outside the ECT range are clamped into it. Change the tables in
+	  the bootloader's ECT, not in the device tree.
+
 config EXYNOS_RGT
 	bool "Exynos Regulator Debug Support"
 	depends on REGULATOR
