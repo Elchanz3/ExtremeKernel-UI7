@@ -26,6 +26,10 @@
 #include <gpex_utils.h>
 #include <gpexbe_devicetree.h>
 
+#if IS_ENABLED(CONFIG_EXYNOS_ECT_DVFS)
+#include <soc/samsung/cal-if.h>
+#endif
+
 #define CPU_MAX INT_MAX
 static gpu_dt dt_info;
 static struct _dt_clock_item *clock_table;
@@ -173,6 +177,94 @@ static int build_clk_table(void)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_EXYNOS_ECT_DVFS)
+#define ECT_G3D_MAX_LEVELS 48
+
+/*
+ * The bootloader's ECT is the source for the G3D table: its DVFS block
+ * gives the levels and its MINMAX row the range. The device tree's
+ * gpu_dvfs_table only lends per-level governor and QoS parameters, from the
+ * row with the same clock or, for a level the DT does not list, from the
+ * nearest row (the lower one on a tie). gpu_max_clock and gpu_min_clock
+ * follow the ECT. Every consumer (clock, DVFS, QoS) indexes this table, so
+ * rebuilding it here keeps them consistent.
+ */
+static int ect_rebuild_clk_table(void)
+{
+	unsigned long rates[ECT_G3D_MAX_LEVELS];
+	unsigned long ect_max, ect_min;
+	dt_clock_item *table;
+	int levels, count = 0, i, j;
+
+	if (!clock_table || !dt_info.gpu_dvfs_table_size.row)
+		return -EINVAL;
+
+	levels = cal_dfs_get_rate_table(dt_info.g3d_cmu_cal_id, rates);
+	ect_max = cal_dfs_get_max_freq(dt_info.g3d_cmu_cal_id);
+	ect_min = cal_dfs_get_min_freq(dt_info.g3d_cmu_cal_id);
+	if (levels <= 0 || levels > ECT_G3D_MAX_LEVELS || !ect_max) {
+		GPU_LOG(MALI_EXYNOS_ERROR,
+			"ECT: no G3D table from CAL, keeping the DT table\n");
+		return -ENODEV;
+	}
+	for (i = 1; i < levels; i++) {
+		if (rates[i] >= rates[i - 1]) {
+			GPU_LOG(MALI_EXYNOS_ERROR,
+				"ECT: G3D levels not descending, keeping the DT table\n");
+			return -EINVAL;
+		}
+	}
+
+	table = kcalloc(levels, sizeof(*table), GFP_KERNEL);
+	if (!table)
+		return -ENOMEM;
+
+	for (i = 0; i < levels; i++) {
+		int best = 0;
+		long best_diff = LONG_MAX;
+
+		if (rates[i] > ect_max || rates[i] < ect_min)
+			continue;
+
+		for (j = 0; j < dt_info.gpu_dvfs_table_size.row; j++) {
+			long diff = abs((long)clock_table[j].clock - (long)rates[i]);
+
+			if (diff < best_diff ||
+			    (diff == best_diff && clock_table[j].clock < clock_table[best].clock)) {
+				best = j;
+				best_diff = diff;
+			}
+		}
+
+		table[count] = clock_table[best];
+		table[count].clock = (int)rates[i];
+		GPU_LOG(MALI_EXYNOS_INFO, "ECT: G3D level %d = %lu kHz%s\n", count,
+			rates[i], best_diff ? " (not in DT; parameters from nearest DT row)" : "");
+		count++;
+	}
+
+	if (!count) {
+		kfree(table);
+		GPU_LOG(MALI_EXYNOS_ERROR,
+			"ECT: no G3D level inside the ECT range, keeping the DT table\n");
+		return -EINVAL;
+	}
+
+	GPU_LOG(MALI_EXYNOS_INFO,
+		"ECT: G3D %d levels %d..%d kHz (DT had %u rows, max %u min %u)\n",
+		count, table[count - 1].clock, table[0].clock, dt_info.gpu_dvfs_table_size.row,
+		dt_info.gpu_max_clock, dt_info.gpu_min_clock);
+
+	kfree(clock_table);
+	clock_table = table;
+	dt_info.gpu_dvfs_table_size.row = count;
+	dt_info.gpu_max_clock = table[0].clock;
+	dt_info.gpu_min_clock = table[count - 1].clock;
+
+	return 0;
+}
+#endif
+
 static int build_cl_pmqos_table(void)
 {
 	int array_size = dt_info.gpu_cl_pmqos_table_size.row * dt_info.gpu_cl_pmqos_table_size.col;
@@ -312,6 +404,9 @@ int gpexbe_devicetree_init(struct device *dev)
 	dt_info.dev = dev;
 	read_from_dt();
 	build_clk_table();
+#if IS_ENABLED(CONFIG_EXYNOS_ECT_DVFS)
+	ect_rebuild_clk_table();
+#endif
 	build_cl_pmqos_table();
 	read_interactive_info_array();
 
