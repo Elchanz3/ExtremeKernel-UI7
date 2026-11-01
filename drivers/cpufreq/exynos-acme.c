@@ -1323,11 +1323,24 @@ static __init int init_domain(struct exynos_cpufreq_domain *domain,
 	 * selected to smaller one between the value defined in device
 	 * tree and CAL. In case of min-freq, min frequency is selected
 	 * to bigger one.
+	 *
+	 * With CONFIG_EXYNOS_ECT_DVFS the CAL values, which come
+	 * from the bootloader's ECT MINMAX row, stand: the device tree no
+	 * longer narrows them.
 	 */
+#if IS_ENABLED(CONFIG_EXYNOS_ECT_DVFS)
+	if (!of_property_read_u32(dn, "max-freq", &val) && val != domain->max_freq)
+		pr_info("exynos-acme: ECT: cpu%d max %u kHz (DT max-freq %u ignored)\n",
+			cpumask_first(&domain->cpus), domain->max_freq, val);
+	if (!of_property_read_u32(dn, "min-freq", &val) && val != domain->min_freq)
+		pr_info("exynos-acme: ECT: cpu%d min %u kHz (DT min-freq %u ignored)\n",
+			cpumask_first(&domain->cpus), domain->min_freq, val);
+#else
 	if (!of_property_read_u32(dn, "max-freq", &val))
 		domain->max_freq = min(domain->max_freq, val);
 	if (!of_property_read_u32(dn, "min-freq", &val))
 		domain->min_freq = max(domain->min_freq, val);
+#endif
 
 	/* If this domain has boost freq, change max */
 	val = exynos_pstate_get_boost_freq(cpumask_first(&domain->cpus));
