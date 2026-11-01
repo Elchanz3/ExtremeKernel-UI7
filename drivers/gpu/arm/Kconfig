@@ -58,6 +58,15 @@ config MALI_BIFROST_R32P1
 config MALI_BIFROST_R38P1
 	depends on MALI_DDK_VERSION
 	bool "Bifrost r38p1 driver for Android T"
+
+config MALI_BIFROST_R51P0
+	depends on MALI_DDK_VERSION
+	bool "Bifrost r51p0 driver (Arm, with Samsung's r38p1 integration)"
+	help
+	  Arm's r51p0 kbase with Samsung's Exynos integration carried over
+	  from the r38p1 driver: the hooks into the kbase core and a copy of
+	  the exynos platform layer in bv_r51p0/platform/exynos. See
+	  bv_r51p0/PORTING.md.
 endchoice
 
 if MALI_BIFROST_R10P0
@@ -90,6 +99,10 @@ endif
 
 if MALI_BIFROST_R38P1
 source "drivers/gpu/arm/bv_r38p1/Kconfig"
+endif
+
+if MALI_BIFROST_R51P0
+source "drivers/gpu/arm/bv_r51p0/Kconfig"
 endif
 
 endmenu
