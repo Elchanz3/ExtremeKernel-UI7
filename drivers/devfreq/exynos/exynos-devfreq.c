@@ -339,6 +339,18 @@ static int exynos_devfreq_init_freq_table(struct exynos_devfreq_data *data)
 	dev_info(data->dev, "max_freq: %uKhz, get_max_freq: %uKhz\n",
 			data->max_freq, max_freq);
 
+#if IS_ENABLED(CONFIG_EXYNOS_ECT_DVFS)
+	/*
+	 * The bootloader's ECT MINMAX row is the source. Drop the device
+	 * tree's freq_info bounds so the code below snaps min and max to the
+	 * ECT values instead of only being allowed to narrow the DT range.
+	 */
+	dev_info(data->dev, "ECT: DT freq_info min %uKhz max %uKhz ignored\n",
+		 data->min_freq, data->max_freq);
+	data->max_freq = U32_MAX;
+	data->min_freq = 0;
+#endif
+
 	if (max_freq < data->max_freq) {
 		flags |= DEVFREQ_FLAG_LEAST_UPPER_BOUND;
 		tmp_max = (unsigned long)max_freq;
@@ -380,6 +392,20 @@ static int exynos_devfreq_init_freq_table(struct exynos_devfreq_data *data)
 
 	dev_info(data->dev, "min_freq: %uKhz, max_freq: %uKhz\n",
 			data->min_freq, data->max_freq);
+
+#if IS_ENABLED(CONFIG_EXYNOS_ECT_DVFS)
+	/*
+	 * The remaining DT frequencies are requests, not bounds: keep them,
+	 * clamped into the ECT range, and take the boot lock frequency from
+	 * the ECT boot level the bootloader trained, not from boot_info.
+	 */
+	data->default_qos = clamp(data->default_qos, data->min_freq, data->max_freq);
+	data->reboot_freq = clamp(data->reboot_freq, data->min_freq, data->max_freq);
+	if (data->boot_freq)
+		data->boot_freq = (u32)cal_dfs_get_boot_freq(data->dfs_id);
+	dev_info(data->dev, "ECT: default_qos %uKhz reboot %uKhz boot lock %uKhz\n",
+		 data->default_qos, data->reboot_freq, data->boot_freq);
+#endif
 
 	for (i = 0; i < data->max_state; i++) {
 		if (data->opp_list[i].freq > data->max_freq ||
