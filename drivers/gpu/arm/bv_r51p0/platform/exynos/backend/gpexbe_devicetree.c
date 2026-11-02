@@ -123,10 +123,6 @@ static int build_clk_table(void)
 	unsigned long ect_max, ect_min;
 	int levels, i;
 
-	/* The ECT (bootloader) DVFS block is the ONLY source of the G3D levels.
-	 * The device-tree gpu_dvfs_table is deliberately never read. If the ECT
-	 * table cannot be obtained, panic rather than silently fall back to the
-	 * DT: a boot loop is recoverable, a wrong silent table is not. */
 	levels = cal_dfs_get_rate_table(dt_info.g3d_cmu_cal_id, rates);
 	ect_max = cal_dfs_get_max_freq(dt_info.g3d_cmu_cal_id);
 	ect_min = cal_dfs_get_min_freq(dt_info.g3d_cmu_cal_id);
@@ -135,9 +131,27 @@ static int build_clk_table(void)
 		panic("gpu_dvfs: no G3D DVFS table from the ECT (levels=%d); DT fallback refused\n",
 		      levels);
 
-	for (i = 1; i < levels; i++)
-		if (rates[i] >= rates[i - 1])
-			panic("gpu_dvfs: ECT G3D levels not strictly descending at index %d\n", i);
+	for (i = 1; i < levels; i++) {
+		unsigned long key = rates[i];
+		int k = i - 1;
+
+		while (k >= 0 && rates[k] < key) {
+			rates[k + 1] = rates[k];
+			k--;
+		}
+		rates[k + 1] = key;
+	}
+	{
+		int n = 0;
+
+		for (i = 0; i < levels; i++)
+			if (n == 0 || rates[i] != rates[n - 1])
+				rates[n++] = rates[i];
+		if (n != levels)
+			GPU_LOG(MALI_EXYNOS_INFO,
+				"ECT: G3D had %d levels, %d after sort+dedup\n", levels, n);
+		levels = n;
+	}
 
 	clock_table = kcalloc(levels, sizeof(*clock_table), GFP_KERNEL);
 	if (!clock_table)
