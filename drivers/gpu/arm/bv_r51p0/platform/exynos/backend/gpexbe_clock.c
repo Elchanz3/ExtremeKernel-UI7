@@ -104,7 +104,18 @@ int gpexbe_clock_init(void)
 	}
 
 	pm_info.boot_clock = cal_dfs_get_boot_freq(cal_id);
-	pm_info.max_clock_limit = (int)cal_dfs_get_max_freq(cal_id);
+
+	/* Cap at the top of the ECT DVFS block, not the MINMAX policy row, so the
+	 * full bootloader level list is lockable. Panic if the ECT table is
+	 * missing rather than fall back to a MINMAX/DT-derived limit. */
+	{
+		unsigned long rates[48];
+		int n = cal_dfs_get_rate_table(cal_id, rates);
+
+		if (n <= 0)
+			panic("gpu_dvfs: no G3D rate table from the ECT for max_clock_limit\n");
+		pm_info.max_clock_limit = (int)rates[0];
+	}
 
 	gpex_utils_get_exynos_context()->pm_info = &pm_info;
 
