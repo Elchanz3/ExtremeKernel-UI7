@@ -353,7 +353,6 @@ static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu)
 	*util = boosted_cpu_util(cpu, rt);
 #endif
 	*util = freqvar_boost_vector(cpu, *util);
-	*util = boosted_cpu_util(cpu);
 	*util = min(*util, max_cap);
 	*max = max_cap;
 
