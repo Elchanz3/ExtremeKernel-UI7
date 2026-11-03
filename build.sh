@@ -46,12 +46,17 @@ echo "Preparing the build environment..."
 pushd $(dirname "$0") > /dev/null
 CORES=`cat /proc/cpuinfo | grep -c processor`
 
-# Define toolchain variables
-CLANG_DIR=$PWD/toolchain/neutron_18
+# Define toolchain variables: ZyC Clang 23 by default, Neutron 18 as fallback.
+# Override with CLANG_DIR=/path/to/toolchain ./build.sh ...
+CLANG_DIR=${CLANG_DIR:-$HOME/tc/Clang-23.0.0git-20260130}
+if [ ! -x "$CLANG_DIR/bin/clang" ]; then
+    echo "Clang not found at $CLANG_DIR, using Neutron 18"
+    CLANG_DIR=$PWD/toolchain/neutron_18
+fi
 PATH=$CLANG_DIR/bin:$PATH
 
-# Check if toolchain exists
-if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
+# Check if toolchain exists (Neutron fallback only)
+if [ "$CLANG_DIR" = "$PWD/toolchain/neutron_18" ] && [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
     echo "-----------------------------------------------"
     echo "Toolchain not found! Downloading..."
     echo "-----------------------------------------------"
@@ -67,6 +72,17 @@ if [ ! -f "$CLANG_DIR/bin/clang-18" ]; then
     echo "Cleaning up..."
     popd > /dev/null
 fi
+
+# Objects from another compiler must not be mixed into an LTO link:
+# start from a clean out/ when the toolchain changes.
+TC_ID=$($CLANG_DIR/bin/clang --version | head -1)
+if [ -d out ] && [ "$(cat out/.toolchain 2>/dev/null)" != "$TC_ID" ]; then
+    echo "Toolchain changed, cleaning out/"
+    rm -rf out
+fi
+mkdir -p out
+echo "$TC_ID" > out/.toolchain
+echo "Toolchain: $TC_ID"
 
 MAKE_ARGS="
 LLVM=1 \
