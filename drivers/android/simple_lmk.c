@@ -569,6 +569,16 @@ static int slmk_last_kill_get(char *buf, const struct kernel_param *kp)
 	return n;
 }
 
+/* lmkd also writes an adj table; Simple LMK has no use for it */
+static int slmk_adj_set(const char *val, const struct kernel_param *kp)
+{
+	return 0;
+}
+
+static const struct kernel_param_ops slmk_adj_ops = {
+	.set = slmk_adj_set,
+};
+
 static const struct kernel_param_ops slmk_kills_ops = {
 	.get = slmk_kills_get,
 };
@@ -581,6 +591,7 @@ static const struct kernel_param_ops slmk_last_kill_ops = {
 #undef MODULE_PARAM_PREFIX
 #define MODULE_PARAM_PREFIX "lowmemorykiller."
 module_param_cb(minfree, &simple_lmk_init_ops, NULL, 0200);
+module_param_cb(adj, &slmk_adj_ops, NULL, 0200);
 module_param_cb(slmk_minfree_mb, &slmk_minfree_ops, &slmk_minfree_mb, 0644);
 module_param_cb(slmk_timeout_ms, &slmk_timeout_ops, &slmk_timeout_ms, 0644);
 module_param_cb(slmk_kills, &slmk_kills_ops, NULL, 0444);
