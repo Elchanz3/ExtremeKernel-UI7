@@ -17,14 +17,19 @@
 #include <linux/vmpressure.h>
 #include <uapi/linux/sched/types.h>
 
+/* Runtime tunables, defaulting to the Kconfig values */
+static unsigned int slmk_minfree_mb = CONFIG_ANDROID_SIMPLE_LMK_MINFREE;
+static unsigned int slmk_timeout_ms = CONFIG_ANDROID_SIMPLE_LMK_TIMEOUT_MSEC;
+
 /* The minimum number of pages to free per reclaim */
-#define MIN_FREE_PAGES (CONFIG_ANDROID_SIMPLE_LMK_MINFREE * SZ_1M / PAGE_SIZE)
+#define MIN_FREE_PAGES \
+	((unsigned long)READ_ONCE(slmk_minfree_mb) * SZ_1M / PAGE_SIZE)
 
 /* Kill up to this many victims per reclaim */
 #define MAX_VICTIMS 1024
 
 /* Timeout in jiffies for each reclaim */
-#define RECLAIM_EXPIRES msecs_to_jiffies(CONFIG_ANDROID_SIMPLE_LMK_TIMEOUT_MSEC)
+#define RECLAIM_EXPIRES msecs_to_jiffies(READ_ONCE(slmk_timeout_ms))
 
 struct victim_info {
 	struct task_struct *tsk;
@@ -502,7 +507,43 @@ static const struct kernel_param_ops simple_lmk_init_ops = {
 	.set = simple_lmk_init_set
 };
 
+static int slmk_set_bounded(const char *val, unsigned int *dst,
+			    unsigned int min, unsigned int max)
+{
+	unsigned int v;
+	int ret = kstrtouint(val, 0, &v);
+
+	if (ret)
+		return ret;
+	if (v < min || v > max)
+		return -EINVAL;
+	WRITE_ONCE(*dst, v);
+	return 0;
+}
+
+static int slmk_minfree_set(const char *val, const struct kernel_param *kp)
+{
+	return slmk_set_bounded(val, &slmk_minfree_mb, 16, 2048);
+}
+
+static int slmk_timeout_set(const char *val, const struct kernel_param *kp)
+{
+	return slmk_set_bounded(val, &slmk_timeout_ms, 50, 5000);
+}
+
+static const struct kernel_param_ops slmk_minfree_ops = {
+	.set = slmk_minfree_set,
+	.get = param_get_uint,
+};
+
+static const struct kernel_param_ops slmk_timeout_ops = {
+	.set = slmk_timeout_set,
+	.get = param_get_uint,
+};
+
 /* Needed to prevent Android from thinking there's no LMK and thus rebooting */
 #undef MODULE_PARAM_PREFIX
 #define MODULE_PARAM_PREFIX "lowmemorykiller."
 module_param_cb(minfree, &simple_lmk_init_ops, NULL, 0200);
+module_param_cb(slmk_minfree_mb, &slmk_minfree_ops, &slmk_minfree_mb, 0644);
+module_param_cb(slmk_timeout_ms, &slmk_timeout_ops, &slmk_timeout_ms, 0644);
