@@ -21,6 +21,11 @@
 static unsigned int slmk_minfree_mb = CONFIG_ANDROID_SIMPLE_LMK_MINFREE;
 static unsigned int slmk_timeout_ms = CONFIG_ANDROID_SIMPLE_LMK_TIMEOUT_MSEC;
 
+/* Kill statistics exposed to userspace */
+static atomic_long_t slmk_kills = ATOMIC_LONG_INIT(0);
+static char slmk_last_kill[96];
+static DEFINE_SPINLOCK(slmk_last_kill_lock);
+
 /* The minimum number of pages to free per reclaim */
 #define MIN_FREE_PAGES \
 	((unsigned long)READ_ONCE(slmk_minfree_mb) * SZ_1M / PAGE_SIZE)
@@ -264,6 +269,14 @@ static void scan_and_kill(void)
 		pr_info("Killing %s with adj %d to free %lu KiB\n", vtsk->comm,
 			vtsk->signal->oom_score_adj,
 			victim->size << (PAGE_SHIFT - 10));
+
+		atomic_long_inc(&slmk_kills);
+		spin_lock(&slmk_last_kill_lock);
+		scnprintf(slmk_last_kill, sizeof(slmk_last_kill),
+			  "%s adj %d %lu KiB", vtsk->comm,
+			  vtsk->signal->oom_score_adj,
+			  victim->size << (PAGE_SHIFT - 10));
+		spin_unlock(&slmk_last_kill_lock);
 
 		/* Make the victim reap anonymous memory first in exit_mmap() */
 		set_bit(MMF_OOM_VICTIM, &mm->flags);
@@ -541,9 +554,34 @@ static const struct kernel_param_ops slmk_timeout_ops = {
 	.get = param_get_uint,
 };
 
+static int slmk_kills_get(char *buf, const struct kernel_param *kp)
+{
+	return scnprintf(buf, PAGE_SIZE, "%ld\n", atomic_long_read(&slmk_kills));
+}
+
+static int slmk_last_kill_get(char *buf, const struct kernel_param *kp)
+{
+	int n;
+
+	spin_lock(&slmk_last_kill_lock);
+	n = scnprintf(buf, PAGE_SIZE, "%s\n", slmk_last_kill);
+	spin_unlock(&slmk_last_kill_lock);
+	return n;
+}
+
+static const struct kernel_param_ops slmk_kills_ops = {
+	.get = slmk_kills_get,
+};
+
+static const struct kernel_param_ops slmk_last_kill_ops = {
+	.get = slmk_last_kill_get,
+};
+
 /* Needed to prevent Android from thinking there's no LMK and thus rebooting */
 #undef MODULE_PARAM_PREFIX
 #define MODULE_PARAM_PREFIX "lowmemorykiller."
 module_param_cb(minfree, &simple_lmk_init_ops, NULL, 0200);
 module_param_cb(slmk_minfree_mb, &slmk_minfree_ops, &slmk_minfree_mb, 0644);
 module_param_cb(slmk_timeout_ms, &slmk_timeout_ops, &slmk_timeout_ms, 0644);
+module_param_cb(slmk_kills, &slmk_kills_ops, NULL, 0444);
+module_param_cb(slmk_last_kill, &slmk_last_kill_ops, NULL, 0444);
